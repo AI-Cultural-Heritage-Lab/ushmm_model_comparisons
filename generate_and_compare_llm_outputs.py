@@ -186,7 +186,7 @@ import pandas as pd
 import gdown
 
 #If we want to specifically run the comparison tests on a different data set of queries and responses (such as outputs that have already been generated), import it here
-# e.g. Cleaned data set of 776 US Queries with no Non-English or otherwise erroneous responses
+# e.g. Cleaned data set of US Queries with no Non-English or otherwise erroneous responses
 
 #Load the file from a google doc link
 url_clean = 'https://docs.google.com/spreadsheets/d/1AZPIbb5rfCnyjq6L4ukq3E95DrDqeoNX/edit?gid=1831836360#gid=1831836360'
@@ -455,7 +455,7 @@ us_search_responses_df_with_composite = compute_composite_similarity_scores(us_s
 
 print(us_search_responses_df_with_composite.head())
 
-"""# Run t-tests on composite similarity scores
+"""# Run tests on composite similarity scores
 
 ## Run t-tests
 """
@@ -510,6 +510,8 @@ results_df = run_pairwise_t_tests(us_search_responses_df_with_composite)
 
 us_search_responses_df_with_composite
 
+"""## Run one-way ANOVA across multiple similarity score columns and perform Tukey test"""
+
 import pandas as pd
 from scipy.stats import f_oneway
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
@@ -561,6 +563,8 @@ print("ANOVA p-value:", results["anova_p_value"])
 if "tukey_summary" in results:
     print("\nTukey HSD Results:")
     print(results["tukey_summary"])
+
+"""##Calculate Cohen's d for the differences"""
 
 import pandas as pd
 import itertools
@@ -614,3 +618,84 @@ def interpret_cohens_d(d):
 
 cohen_results = calculate_pairwise_cohens_d(us_search_responses_df_with_composite, similarity_cols)
 print(cohen_results)
+
+"""##Filter data set based on query responses with similar word counts"""
+
+#calculates word count only
+def process_word_count(df):
+
+    # Ensure required columns exist
+    required_columns = ["ushmm_article", "GPT-4o Response", "Gemini Response", "Grok Response"]
+    if not all(col in df.columns for col in required_columns):
+        raise ValueError(f"CSV must contain the columns: {required_columns}")
+
+    # Compute Readability and Word Count
+    for col in required_columns:
+        df[f"{col} - Word Count"] = df[col].apply(count_words)
+    return df
+
+print(us_search_responses_df_with_composite.head())
+us_search_responses_df_with_composite_and_word_count = process_word_count(us_search_responses_df_with_composite)
+print(us_search_responses_df_with_composite_and_word_count.head())
+
+df = us_search_responses_df_with_composite_and_word_count
+import pandas as pd
+# Define relevant columns
+ushmm_col = "ushmm_article - Word Count"
+gpt_col = "GPT-4o Response - Word Count"
+gemini_col = "Gemini Response - Word Count"
+grok_col = "Grok Response - Word Count"
+
+# Create filters
+min_words = 100
+
+# ±50% bounds
+lower_bound = df[ushmm_col] * 0.5
+upper_bound = df[ushmm_col] * 1.5
+
+# Combined condition
+filtered_df = df[
+    (df[ushmm_col] >= min_words) &
+    (df[gpt_col] >= min_words) &
+    (df[gemini_col] >= min_words) &
+    (df[grok_col] >= min_words) &
+    (df[gpt_col] >= lower_bound) & (df[gpt_col] <= upper_bound) &
+    (df[gemini_col] >= lower_bound) & (df[gemini_col] <= upper_bound) &
+    (df[grok_col] >= lower_bound) & (df[grok_col] <= upper_bound)
+]
+
+# Output the number of matching rows
+print(f"Number of rows where all responses are at least 100 words and within ±50% of USHMM length: {len(filtered_df)}")
+
+# Preview the filtered rows
+filtered_df.head()
+
+# Print number of matching rows
+print(f"Number of rows with comparable word counts: {len(filtered_df)}")
+
+# Optionally: preview matching rows
+print(filtered_df.head())
+
+filtered_df.to_excel("similar_word_count_df.xlsx", index=False)
+
+results_df_2 = run_pairwise_t_tests(filtered_df)
+
+similarity_cols = [
+    "USHMM-GPT Similarity",
+    "USHMM-Gemini Similarity",
+    "USHMM-Grok Similarity",
+    "GPT-Gemini Similarity",
+    "GPT-Grok Similarity",
+    "Gemini-Grok Similarity"
+]
+
+results_2 = run_anova_and_tukey(filtered_df, similarity_cols)
+
+print("ANOVA p-value:", results_2["anova_p_value"])
+
+if "tukey_summary" in results_2:
+    print("\nTukey HSD Results:")
+    print(results_2["tukey_summary"])
+
+cohen_results_2 = calculate_pairwise_cohens_d(filtered_df, similarity_cols)
+print(cohen_results_2)
